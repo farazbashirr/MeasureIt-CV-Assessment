@@ -8,15 +8,16 @@ below is added later, copied from a saved script output; no number here is estim
 
 | Field | Entry |
 |---|---|
-| What is measured | Absolute error of the reported width and height, in millimetres, against calliper ground truth, over 12 held-out instances (A01–A12) that were never used for training, validation or threshold tuning. |
-| How | `evaluation/accuracy_study.py` compares each saved `measurement/results/A*.json` with `measurement/ground_truth.csv` (three calliper readings per dimension, mean used). It writes every instance, the mean absolute error, the mean percentage error, the median and the worst case. |
+| What is measured | Absolute error of the reported width and height, in millimetres, against ground truth from the recorded instrument, over 12 held-out instances (A01–A12) that were never used for training, validation or threshold tuning. |
+| How | `evaluation/accuracy_study.py` compares each saved `measurement/results/A*.json` with `measurement/ground_truth.csv` (three readings per dimension with the recorded instrument, mean used). It writes every instance, the mean absolute error, the mean percentage error, the median and the worst case. |
 | Target | MAE ≤ **1.0 mm** and worst absolute error ≤ **2.0 mm** on both width and height; at least 10 of 12 instances within 1.5 mm on both dimensions. |
-| Conditions | 2048×1536 working images, 380–450 mm working distance, plane tilt ≤ 15°, object and reference coplanar on the same matte base, locked phone camera, indoor daylight plus one lamp. |
+| Conditions | 2048×1536 working images, object spanning 25–30 % of frame width (≈280–340 mm for a 120 mm plate with the Pixel 8 Pro main lens), plane tilt ≤ 15°, object and reference coplanar on the same matte base, locked camera, indoor daylight plus one lamp. |
 | Not included | Occluded or partly hidden reference, tilt > 15°, frames rejected by the blur gate, objects outside the trained class, and dimensions taken on any face other than the top face. |
 
-Why 1.0 mm: on a ~120 mm part this is 0.8 %, a sensible band for a non-critical fit check. At roughly 12 px/mm,
-one pixel of boundary error on each side already costs ~0.17 mm, so 1 mm is reachable but not automatic. A target
-that could be cleared without doing the work would prove nothing.
+Why 1.0 mm: on a ~120 mm part this is 0.8 %, a sensible band for a non-critical fit check. At the planned framing
+the object is ~510–610 px wide (~4.3–5.1 px/mm), and the 512-pixel model input sees roughly 0.23 mm per pixel;
+two boundaries plus the scale term make 1.0 mm reachable but not automatic. A target that could be cleared
+without doing the work would prove nothing.
 
 ## MO-2 — End-to-end latency on CPU
 
@@ -35,7 +36,7 @@ that could be cleared without doing the work would prove nothing.
 | What is measured | Width error in millimetres as the angle between the object plane and the sensor plane increases (0°, 10°, 20°, 30°, 40°). |
 | How | `evaluation/condition_study.py` over the pre-registered 25-frame sweep (five instances per angle). The angle is not assumed: it is computed from `solvePnP` on the ArUco marker for every frame and logged next to the error. |
 | Target | MAE ≤ **2.0 mm** up to 20°; and the refusal threshold must sit at the first angle where error exceeds **3.0 mm**, with that angle stated. |
-| Conditions | Fixed 400 mm distance, same camera lock, same base and lighting, object and marker coplanar at 0°. |
+| Conditions | Fixed framing as in MO-1 (object ≈27 % of frame width), same camera lock, same base and lighting, object and marker coplanar at 0°. |
 | Not included | Tilt combined with distance change, tilt beyond 40°, and motion-blurred frames. |
 
 Why tilt rather than distance or lighting: the pose gives an objective x-axis in degrees, it is the assumption the

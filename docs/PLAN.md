@@ -3,11 +3,11 @@
 xis.ai AI/CV technical assessment · branch `dev-test01` · started 2026-11-05
 
 **Machine:** Dell Latitude 5490 — Intel i5-8365U (4C/8T, 15 W), 15.8 GB RAM, Intel UHD 620, no CUDA, Windows 11.
-**Camera:** phone main camera, focus/zoom/ISO/white balance locked, 4:3. Working resolution **2048×1536**; native
-originals archived locally, the 2048×1536 set is the canonical input for calibration and measurement.
-**Object:** flat rigid matte plate, about 120 × 80 × 4 mm, on the same base as the reference.
-**Reference:** printed ArUco `DICT_4X4_50` marker (~40 mm black square) on card of matched thickness, measured
-with a calliper — not trusted from the print file.
+**Camera:** Pixel 8 Pro, main (wide) lens, 1.0× zoom, focus/ISO/white balance locked, 4:3. Working resolution **2048×1536**;
+native originals archived locally, the 2048×1536 set is the canonical input for calibration and measurement.
+**Object:** flat rigid matte plate, about 120 × 80 × 4 mm (placeholder until measured), on the same base as the reference.
+**Reference:** printed ArUco `DICT_4X4_50` marker (~40 mm black square) on card matched to the object's thickness, measured
+with the same instrument as the object — not trusted from the print file.
 
 ## 1. Order of work
 
@@ -48,9 +48,10 @@ about one second on this laptop.
 ## 3. Dataset pre-registration (frozen before capture)
 
 100 images, 10 sessions × 10 shots, split **by session** so near-duplicates cannot cross splits:
-**S01–S07 train (70) · S08–S09 val (20) · S10 test (10)**. Distances 350–520 mm, rotations 0–45°, three
-backgrounds (light grey, white paper, dark cloth) and three light sources (daylight, window, warm lamp) all occur
-in training. The test session uses only conditions already seen in training, but a session never seen before.
+**S01–S07 train (70) · S08–S09 val (20) · S10 test (10)**. The object spans 25–30 % of the frame width (≈280–340 mm for
+a 120 mm plate on the Pixel 8 Pro main lens), rotations 0–45°, three backgrounds (light grey, white paper, dark cloth)
+and three light sources (daylight, window, warm lamp) all occur in training. The test session uses only conditions
+already seen in training, but a session never seen before.
 
 `dataset/splits.csv` is the authority. Filenames are fixed there and captures are renamed to match; a bad frame
 is excluded and declared, never replaced after seeing results. Two further sets are held out and pre-registered
@@ -68,3 +69,14 @@ in that order and record it in the Definition of Done.
 | Date | Change | Why |
 |---|---|---|
 | 2026-11-05 | Initial plan committed before any code | — |
+| 2026-11-05 | Camera fixed to the Pixel 8 Pro main lens; fixed working distance replaced by a framing rule; the instrument is recorded rather than assumed to be a calliper | The earlier 350–520 mm range put a 120 mm object at ~18–21 % of frame width. A 25–30 % framing gives ~4.3–5.1 px/mm at 2048 px and makes the 512-px model input worth 0.23 mm per pixel. |
+
+## 6. Pending physical inputs (blocking, not yet assumed)
+
+- Print the board at 100 %, mount it flat, and measure the printed square with the instrument that will be recorded.
+- Capture 30+ ChArUco views with the locked Pixel 8 Pro.
+- Confirm the object, its measured size and thickness, and the instrument used for ground truth.
+- Produce a reference marker on card matched to the object's thickness.
+
+The board generator, calibration pipeline, tests and image normalisation are written; none of the measurements above
+exist yet, so this repository makes no claim of a completed calibration or of measured accuracy.

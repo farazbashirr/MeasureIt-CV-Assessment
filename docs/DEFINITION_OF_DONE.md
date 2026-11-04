@@ -14,7 +14,7 @@ file or a commit link beside them. A ticked box with no evidence counts as untic
 
 ## B. Calibration (item 1)
 
-- [ ] At least 20 ChArUco or checkerboard views captured, board square measured with the calliper. — evidence: `pending`
+- [ ] At least 20 ChArUco or checkerboard views captured, board square measured with the recorded instrument. — evidence: `pending`
 - [ ] Camera matrix and distortion coefficients saved to a file that every entry point loads. — evidence: `pending`
 - [ ] Reprojection error reported, with the image count. — evidence: `pending`
 - [ ] Undistortion check shows straight edges staying straight. — evidence: `pending`
@@ -45,7 +45,7 @@ file or a commit link beside them. A ticked box with no evidence counts as untic
 
 ## F. Accuracy and the cost of distortion (items 5–6)
 
-- [ ] 10 or more instances measured by hand (calliper) and by the system. — evidence: `pending`
+- [ ] 10 or more instances measured by hand with the recorded instrument and by the system. — evidence: `pending`
 - [ ] Per-instance table with every instance, plus MAE, mean percentage error, median and worst case. — evidence: `pending`
 - [ ] Raw outputs saved and the table regenerated from them by script. — evidence: `pending`
 - [ ] Same instances measured on raw and on undistorted images, both errors side by side. — evidence: `pending`
