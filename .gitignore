@@ -1,0 +1,30 @@
+# --- Python ---
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# --- Local scratch / phone transfer staging ---
+/data_incoming/
+/tmp/
+*.log
+
+# --- Assessment brief is input, not a deliverable ---
+/AI_CV_Assessment.pdf
+/assessment_text.txt
+
+# --- OS / editor ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/
+
+# --- Notebooks are deliberately not used in this project ---
+.ipynb_checkpoints/

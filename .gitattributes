@@ -1,0 +1,21 @@
+* text=auto
+
+# Text: normalise to LF so scripts and manifests are identical on any machine
+*.py      text eol=lf
+*.md      text eol=lf
+*.csv     text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.txt     text eol=lf
+*.ps1     text eol=crlf
+
+# Binary: never diff, never convert
+*.jpg     binary
+*.jpeg    binary
+*.png     binary
+*.pdf     binary
+*.pt      binary
+*.pth     binary
+*.npz     binary
+*.onnx    binary
