@@ -257,6 +257,8 @@ def build_condition_study(
     manifest = load_angle_manifest(manifest_path)
     results_path = Path(results_dir)
     images_path = None if images_dir is None else Path(images_dir)
+    if images_path is not None and not images_path.is_dir():
+        raise EvaluationError(f"images directory not found: {images_path}")
 
     truth: dict[str, GroundTruth] | None = None
     truth_error = None

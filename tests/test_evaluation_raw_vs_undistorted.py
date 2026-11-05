@@ -10,7 +10,9 @@ from pathlib import Path
 import cv2
 import numpy as np
 import pytest
+import torch
 
+import evaluation.raw_vs_undistorted as raw_module
 from evaluation.raw_vs_undistorted import (
     compare_frame,
     main,
@@ -114,6 +116,62 @@ def test_side_by_side_has_double_width_plus_gap():
     combined = side_by_side(image, image)
     assert combined.shape[0] == image.shape[0]
     assert combined.shape[1] == image.shape[1] * 2 + 12
+
+
+class CenterRectModel(torch.nn.Module):
+    """Deterministic stand-in that predicts a centred rectangle."""
+
+    def forward(self, x):
+        height, width = x.shape[-2:]
+        logits = torch.full((x.shape[0], 1, height, width), -20.0)
+        logits[:, :, height // 4 : 3 * height // 4, width // 4 : 3 * width // 4] = 20.0
+        return logits
+
+
+def test_run_comparison_full_success_writes_measurements_and_overlays(
+    tmp_path, monkeypatch
+):
+    image_path = _write_image(tmp_path)
+    camera_path = tmp_path / "camera.json"
+    _camera(distorted=False).save(camera_path)
+    reference_path = _write_reference(tmp_path, 40.0)
+    checkpoint_path = tmp_path / "best.pt"
+    checkpoint_path.write_bytes(b"synthetic checkpoint placeholder")
+    meta = {
+        "architecture": {"name": "synthetic_center_rect", "classes": 1},
+        "image_size": 64,
+        "normalization": {},
+        "epoch": 0,
+    }
+    monkeypatch.setattr(
+        raw_module,
+        "load_checkpoint",
+        lambda _path: (CenterRectModel(), meta),
+    )
+
+    output = run_comparison(
+        image_path=image_path,
+        camera_path=camera_path,
+        reference_path=reference_path,
+        checkpoint_path=checkpoint_path,
+        out_dir=tmp_path / "out",
+        refine=False,
+    )
+
+    assert output.exit_code == 0
+    assert output.payload["status"] == "ok"
+    assert output.payload["measurements_available"] is True
+    assert output.payload["measurements"]["raw"]["status"] == "ok"
+    assert output.payload["measurements"]["undistorted"]["status"] == "ok"
+    assert output.payload["difference"]["available"] is True
+    assert output.raw_overlay_path is not None and output.raw_overlay_path.is_file()
+    assert (
+        output.undistorted_overlay_path is not None
+        and output.undistorted_overlay_path.is_file()
+    )
+    written = json.loads(output.json_path.read_text(encoding="utf-8"))
+    assert written["measurements"]["raw"]["width_mm"] is not None
+    assert written["measurements"]["undistorted"]["height_mm"] is not None
 
 
 def test_run_comparison_without_calibration_writes_unavailable_json(tmp_path):

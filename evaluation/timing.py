@@ -545,11 +545,20 @@ def run_benchmark(
             None if payload["geometry_measurement_available"] else geometry_reason
         )
 
-        first = reps[0]
+        all_ok = all(row["measurement_status"] == "ok" for row in reps)
+        first_code = next(
+            (
+                row["measurement_code"]
+                for row in reps
+                if row["measurement_code"] is not None
+            ),
+            None,
+        )
         payload["measurement"] = {
-            "status": first["measurement_status"],
-            "code": first["measurement_code"],
-            "ok": first["measurement_status"] == "ok",
+            "status": "ok" if all_ok else "not_ok",
+            "code": None if all_ok else first_code or "measurement_not_ok",
+            "ok": all_ok,
+            "repetition_statuses": [row["measurement_status"] for row in reps],
         }
         if all(row["measurement_status"] == "ok" for row in reps):
             return finish(
