@@ -373,10 +373,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     best_iou = -1.0
     if config.resume is not None:
         try:
-            model, payload = load_checkpoint(config.resume)
+            resumed_model, payload = load_checkpoint(config.resume)
         except (FileNotFoundError, ValueError, RuntimeError) as exc:
             print(f"ERROR: cannot resume: {exc}", file=sys.stderr)
             return 2
+        # Copy weights into the existing module so the optimizer keeps valid
+        # parameter references; reassigning the model would orphan them.
+        model.load_state_dict(resumed_model.state_dict())
         model.to(device)
         if "optimizer" in payload:
             optimizer.load_state_dict(payload["optimizer"])
