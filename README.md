@@ -17,9 +17,10 @@ no Roboflow model).
 | Phase 0 — plan, objectives, definition of done, frozen split | complete (`docs/`) |
 | Phase 1 — board generator, camera model, calibration pipeline | software complete, **physical calibration not performed** |
 | Phase 2 — ingestion, quality checks, annotation tooling, reporting | software complete |
+| Phase 3 — U-Net segmentation, measurement engine, inference CLI | **software complete; model not trained** |
 | Dataset images | **0 / 100** — no real photographs have been captured yet |
 | Annotations | **0** — no masks or polygons exist |
-| Segmentation model | not started, not trained |
+| Segmentation model | implemented, **not trained**; no checkpoint exists |
 | Measurement accuracy vs instrument | not measured |
 
 `calibration/params/camera.json` and `calibration/report/` **do not exist**. They
@@ -27,6 +28,10 @@ are only written by a real passing calibration run, and no such run has
 happened. Nothing in this repository fabricates images, masks, measurements or
 metrics. `dataset/report/dataset_report.md` currently says `0 / 100`, which is
 the honest state.
+
+Phase 3's tests use generated markers and known synthetic transformations. They
+verify the software's geometry and refusal paths; they are **not** real-world
+measurement evidence and say nothing about accuracy against an instrument.
 
 ---
 
@@ -44,7 +49,9 @@ the honest state.
    then refine at full resolution.
 6. **Measure**: detect the printed ArUco reference, compute the homography to
    the metric plane, take the segmentation mask's oriented min-area rectangle,
-   and convert pixels to millimetres.
+   and convert pixels to millimetres. The inference command refuses to emit a
+   valid measurement when the calibration, measured reference size, or
+   checkpoint is missing.
 7. **Prove it**: compare 12 measured instances against a real instrument and
    report the actual error.
 
@@ -59,7 +66,11 @@ dataset/            frozen split, ingestion, quality, annotation, reporting
   splits.csv            frozen 100-image manifest (never edited)
   report/               generated dataset report (committed baseline: 0/100)
 measureit/          shared camera model and image I/O
-measurement/        accuracy-instance and tilt manifests (physical work pending)
+segmentation/       U-Net + MobileNetV3-Small, training, evaluation, metrics
+measurement/        ArUco reference, homography geometry, measurement engine,
+                    inference CLI, reference.json template, physical manifests
+runs/               local training runs and checkpoints (gitignored)
+results/            local inference JSON/overlays (gitignored)
 docs/               PLAN.md, OBJECTIVES.md, DEFINITION_OF_DONE.md
 tests/              synthetic-only unit tests (never write into dataset/)
 tools/              helper scripts
@@ -77,6 +88,37 @@ python -m pytest
 ```
 
 Windows is the development platform; the tools use `pathlib` and work on any OS.
+
+### Phase 3 environment (verified, not assumed)
+
+The existing Python 3.15 environment is compatible, so no second environment was
+created. Verified on this development machine:
+
+| Item | Value |
+|---|---|
+| Python | 3.15.0 |
+| torch / torchvision | 2.15.0+cpu / 0.29.2+cpu (PyPI Windows wheels) |
+| CUDA | not available, not built |
+| OpenCV | 4.14.0 (contrib, ArUco included) |
+| RAM / logical CPUs | 16 GB / 8 (torch uses 4 threads by default) |
+| Model parameters | 1,739,505 |
+| Checkpoint size | ~6.8 MB (state dict ~6.7 MB) |
+
+The ImageNet encoder weights (~10 MB) are downloaded once, only when training
+with `--pretrained` (the default). Use `--no-pretrained` offline.
+
+Measured CPU timings with **random, untrained weights** — architecture timing,
+not accuracy:
+
+| Operation | Time |
+|---|---|
+| U-Net forward, 1×3×512×512 | 0.13 s median (0.11 s best of 5) |
+| Coarse + full-resolution refinement, 2048×1536 frame | 0.41 s median |
+| ArUco detection + homography + rectangle | ~0.07 s |
+| Full inference command | ~1.0 s (includes model and image loading) |
+
+These numbers only say the software fits the CPU budget. They are not a model
+quality claim.
 
 ---
 
@@ -309,6 +351,152 @@ area percentages, IoU and any problem per stem, so a batch can be checked quickl
 
 ---
 
+## Phase 3 — segmentation model
+
+### Architecture and training
+
+- **U-Net** with a **MobileNetV3-Small** encoder (ImageNet weights when
+  pretrained), five levels (1/2 … 1/32) and skip connections; decoder from
+  scratch. Output is one logit channel at the input resolution.
+- Input is RGB, resized to **512×512** (a 4:3 frame is squashed; the mask is
+  resized identically and the coarse mask is mapped back before refinement),
+  normalised with the ImageNet mean/std.
+- Loss is **0.5 × BCEWithLogits + 0.5 × (1 − soft Dice)**, averaged per image.
+- Training is deterministic: Python, NumPy and torch seeds are fixed,
+  deterministic algorithms are requested, and augmentations (horizontal /
+  vertical flip, ±10° rotation, ±10 % brightness/contrast) are a pure function
+  of `(seed, epoch, sample index)`.
+- Images and masks come **only** from the frozen split. A split with no genuine
+  image+mask pairs raises `DatasetUnavailable`; a partially annotated split is
+  refused unless `--allow-partial` is passed, and the reduced count is recorded
+  in `run.json`. The trainer never reads synthetic fixtures.
+- AdamW, `ReduceLROnPlateau`, early stopping on validation IoU. `best.pt` keeps
+  the best validation IoU; `last.pt` also has optimizer/scheduler state for
+  resumption. A checkpoint stores the architecture, input size, normalisation,
+  training config, epoch, validation metrics and split SHA.
+- `runs/` is gitignored: checkpoints are local artifacts, not repository
+  content.
+
+### Metrics (definitions, not COCO)
+
+- `mean_iou`: mean per-image IoU of the binary mask thresholded at 0.5.
+- `precision` / `recall`: pixel-level counts aggregated over the split.
+- `map50` / `map50_95`: **single-class mask AP**. Each image contributes one
+  prediction ranked by the mean probability inside the predicted mask; a
+  prediction is a true positive when its mask IoU reaches the threshold. AP is
+  the all-point interpolated area under the precision–recall curve;
+  `map50_95` averages AP at IoU 0.50, 0.55, …, 0.95. This is **not** COCO box
+  AP and is never presented as such.
+- An empty split or a missing checkpoint produces
+  `"available": false` with a reason and `null` metrics — never a fabricated
+  zero.
+
+### Commands
+
+```powershell
+# Train (refuses an empty or synthetic-only split; writes runs/seg/)
+python -m segmentation.train --out runs/seg --epochs 40 --batch-size 4
+
+# Evaluate a checkpoint on the frozen test split
+python -m segmentation.evaluate --checkpoint runs/seg/best.pt --split test `
+    --out runs/seg/eval_test
+```
+
+`python -m segmentation.train --help` documents seed, image size, workers,
+pretrained weights, partial-split handling and resume.
+
+**No training run has been performed.** There are 0 annotated images, so no
+checkpoint, metric or model-quality claim exists.
+
+---
+
+## Phase 3 — measurement engine and inference CLI
+
+### Reference marker
+
+`measurement/reference.json` (schema `measureit.reference/1`) configures the
+ArUco dictionary, marker id, the measured physical size, and the validation
+limits. The committed file has:
+
+```json
+{ "dictionary": "DICT_4X4_50", "marker_id": 0, "marker_size_mm": null }
+```
+
+`marker_size_mm` is the **measured side of the printed marker's outer black
+square** (the square whose corners OpenCV reports). It is `null` until a marker
+is printed and measured with a ruler/caliper. The inference command exits `3`
+with `reference_size_unknown` while it is null; no default dimension is assumed.
+
+One marker is detected, validated (single instance, convex, fully inside the
+frame, minimum pixel size, maximum side ratio), and its four corners are mapped
+to a `marker_size_mm` square. That homography supplies the physical scale and
+rectifies the plane, so camera tilt is compensated **if the marker and object
+are coplanar**. A single view cannot verify coplanarity; every successful result
+carries that statement in `coplanarity_assumption` and `warnings`.
+
+### Geometry
+
+The segmentation contour is transformed into the rectified millimetre frame and
+reduced to an oriented minimum-area rectangle. `width_mm ≥ height_mm`; the
+reported angle is the long side's direction in the marker frame (0° along the
+marker's top edge, increasing towards its right edge, modulo 180°).
+
+### Reliability and refusal
+
+`reliability` is a **rule-based geometry grade** (`high`, `medium`, `low`), not a
+learned probability. It rises with a larger marker, lower foreshortening, a
+larger object and more room to the frame border. The result includes the
+individual `checks` and human-readable `warnings`.
+
+| Outcome | Code | Exit |
+|---|---|---|
+| measurement produced | — | 0 |
+| unreadable image, unwritable output | — | 2 |
+| calibration missing/invalid or wrong image size | `missing_calibration`, `invalid_calibration`, `calibration_image_size_mismatch` | 3 |
+| reference config missing/invalid or size null | `missing_reference_config`, `invalid_reference_config`, `reference_size_unknown` | 3 |
+| checkpoint missing/invalid | `missing_checkpoint`, `invalid_checkpoint` | 3 |
+| no reference marker | `missing_reference` | 4 |
+| no object mask | `missing_object` | 4 |
+| mask touches the border or is split | `partial_occlusion` | 4 |
+| degenerate homography/rectangle, implausible size | `invalid_geometry` | 4 |
+
+An unavailable or rejected measurement still writes the structured JSON (with
+`"measurement": null` where appropriate), so the reason is machine-readable. It
+never emits a millimetre value from a missing calibration, an unmeasured
+reference, an untrained checkpoint, or a rejected image.
+
+### Running inference
+
+```powershell
+# 1. Print the ArUco marker, measure its outer square, set marker_size_mm.
+# 2. Run a real calibration -> calibration/params/camera.json.
+# 3. Train or provide a checkpoint -> runs/seg/best.pt.
+python -m measurement.infer `
+    --image dataset/images/S01_001.jpg `
+    --camera calibration/params/camera.json `
+    --reference measurement/reference.json `
+    --checkpoint runs/seg/best.pt `
+    --out results
+```
+
+The image must match the calibrated resolution exactly (2048×1536 for this
+project); it is undistorted **before** segmentation and marker detection. The
+coarse 512² prediction is followed by a full-resolution crop refinement
+(`--no-refine` disables it). Outputs are `results/<stem>_result.json` and
+`results/<stem>_overlay.png` (marker in blue, mask contour in green, oriented
+rectangle and dimensions in red).
+
+### What the synthetic tests prove
+
+`tests/test_measurement_*.py` generate ArUco markers, synthetic 50 mm
+references, known perspective transforms and an explicit 100×60 mm object. They
+prove detection, homography/rectification, min-area rectangles, mm conversion,
+tilt compensation, reliability grading and every refusal path above. They are
+**software tests**, not real-world measurement evidence; no physical marker,
+camera or instrument was used.
+
+---
+
 ## Adding your Pixel 8 Pro photographs later
 
 The camera is fixed in `docs/PLAN.md`: **Pixel 8 Pro, main (wide) lens, 1.0×
@@ -320,23 +508,44 @@ session.
    `python -m calibration.make_board measure --square-x-mm <x> --square-y-mm <y>`.
    The calibration reads the measured square from `board_spec.json`; it is never
    assumed to be exactly 25 mm.
-2. In the Pixel camera's Pro controls: main lens, 1.0×, 4:3, 12 MP (not 50 MP),
+2. Generate and print the reference marker (default `DICT_4X4_50`, id 0), then
+   measure its **outer black square** with a ruler/caliper and put that value in
+   `measurement/reference.json` as `marker_size_mm`:
+
+   ```powershell
+   python -c "import cv2; d=cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50); cv2.imwrite('reference_marker.png', cv2.aruco.generateImageMarker(d, 0, 1200))"
+   ```
+
+   Do not use a nominal paper size as the marker size: measure the print.
+3. In the Pixel camera's Pro controls: main lens, 1.0×, 4:3, 12 MP (not 50 MP),
    flash off, timer 3 s, focus locked on the object plane, ISO and white balance
    fixed for the whole session. Keep the phone in the **same orientation**
    (landscape) for every frame — ingest rejects a rotated frame rather than
    stretching it.
-3. Frame the object at **25–30 % of the frame width** (≈280–340 mm for a 120 mm
-   plate). Keep the board and object on the same plane.
-4. Capture 30+ board views, then run the real calibration:
+4. Frame the object at **25–30 % of the frame width** (≈280–340 mm for a 120 mm
+   plate). Keep the marker and the object on the **same plane**; the measurement
+   assumes coplanarity and cannot verify it from one view.
+5. Capture 30+ board views, then run the real calibration:
    `python -m calibration.calibrate`. Only a passing run may write
    `calibration/params/camera.json` and `calibration/report/`.
-5. Capture each session (10 frames), transfer the originals to `data_incoming/`,
+6. Capture each session (10 frames), transfer the originals to `data_incoming/`,
    name them with their stems (or add `mapping.csv`), then:
    `python -m dataset.ingest ingest`, `python -m dataset.annotate validate`,
    `python -m dataset.annotate review`, `python -m dataset.reporting`.
-6. Commit `dataset/images/`, `dataset/masks/` (or `dataset/annotations/`),
+7. Train and evaluate on the annotated split, then measure a new frame:
+
+   ```powershell
+   python -m segmentation.train --out runs/seg --epochs 40
+   python -m segmentation.evaluate --checkpoint runs/seg/best.pt --split test --out runs/seg/eval_test
+   python -m measurement.infer --image dataset/images/S01_001.jpg `
+       --camera calibration/params/camera.json `
+       --reference measurement/reference.json `
+       --checkpoint runs/seg/best.pt --out results
+   ```
+
+8. Commit `dataset/images/`, `dataset/masks/` (or `dataset/annotations/`),
    `dataset/capture_log.csv` and the regenerated `dataset/report/`. Do not commit
-   `dataset/originals/` or `data_incoming/`.
+   `dataset/originals/`, `data_incoming/`, `runs/` or `results/`.
 
 Until that happens the dataset is **not** complete and no measurement claim is
 made.
@@ -356,6 +565,9 @@ made.
 | `python -m dataset.annotate masks-to-polygons` | recover polygons from masks |
 | `python -m dataset.annotate review` | overlays + summary CSV |
 | `python -m dataset.reporting` | regenerate the dataset report |
+| `python -m segmentation.train` | train the U-Net on the frozen splits |
+| `python -m segmentation.evaluate` | evaluate a checkpoint, or report unavailable |
+| `python -m measurement.infer` | measure one image, or refuse explicitly |
 
 All commands accept `--help`.
 
@@ -371,8 +583,12 @@ The suite is synthetic-only: every fixture is written to a temporary directory,
 never into `dataset/`. It covers EXIF orientation, aspect rejection, resolution
 normalisation, duplicate content, split integrity and the frozen SHA, quality
 thresholds, mask validation, polygon/mask round-trips, the IoU gate, corrupted
-files, and the CLIs end to end. As of this commit there are 64 tests and all of
-them pass (`64 passed`).
+files, and the CLIs end to end. Phase 3 adds model/loss/checkpoint tests, metric
+tests (including the mask-AP definition), frozen-split loader tests, generated
+ArUco detection, homography/rectification, min-area rectangles, pixel-to-mm
+conversion, tilt compensation and rejection tests for missing reference,
+missing object, partial occlusion, invalid geometry and every CLI refusal path.
+As of this commit there are 124 tests and all of them pass (`124 passed`).
 
 ---
 
@@ -381,9 +597,16 @@ them pass (`64 passed`).
 - No camera has been calibrated; there are no intrinsics in the repository.
 - No real dataset image, mask or polygon exists; the 100-image dataset is not
   complete.
-- No model has been trained.
+- No reference marker has been printed or measured; `marker_size_mm` is `null`.
+- No model has been trained; there is no checkpoint and no measured model metric.
 - No measurement has been compared with an instrument, so no accuracy figure is
   claimed.
+- Tilt angles, marker sizes and object sizes in the tests are synthetic. The
+  tests do not demonstrate real-world measurement accuracy.
+- The measurement assumes the marker and object are coplanar. That assumption is
+  stated in every result and is not verified by the software.
+- `reliability` is a rule-based geometry grade, not a calibrated probability or a
+  confidence interval.
 
 See `docs/PLAN.md`, `docs/OBJECTIVES.md` and `docs/DEFINITION_OF_DONE.md` for the
 contract this work is measured against.
