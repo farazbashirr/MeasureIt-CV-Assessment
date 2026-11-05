@@ -315,9 +315,11 @@ The camera is fixed in `docs/PLAN.md`: **Pixel 8 Pro, main (wide) lens, 1.0×
 zoom, 4:3, 2048×1536 working resolution**, focus/ISO/white balance locked per
 session.
 
-1. Print the ChArUco board (`python -m calibration.make_board`) on A4 at 100 %
-   scale, measure the printed square with a ruler, and record it with
-   `python -m calibration.make_board measure ...` (see `--help`).
+1. Print the ChArUco board (`python -m calibration.make_board generate`) on A4 at
+   100 % scale, measure the printed square with a ruler, and record it:
+   `python -m calibration.make_board measure --square-x-mm <x> --square-y-mm <y>`.
+   The calibration reads the measured square from `board_spec.json`; it is never
+   assumed to be exactly 25 mm.
 2. In the Pixel camera's Pro controls: main lens, 1.0×, 4:3, 12 MP (not 50 MP),
    flash off, timer 3 s, focus locked on the object plane, ISO and white balance
    fixed for the whole session. Keep the phone in the **same orientation**
@@ -326,8 +328,8 @@ session.
 3. Frame the object at **25–30 % of the frame width** (≈280–340 mm for a 120 mm
    plate). Keep the board and object on the same plane.
 4. Capture 30+ board views, then run the real calibration:
-   `python -m calibration.calibrate --square-mm <measured>`. Only a passing run
-   may write `calibration/params/camera.json`.
+   `python -m calibration.calibrate`. Only a passing run may write
+   `calibration/params/camera.json` and `calibration/report/`.
 5. Capture each session (10 frames), transfer the originals to `data_incoming/`,
    name them with their stems (or add `mapping.csv`), then:
    `python -m dataset.ingest ingest`, `python -m dataset.annotate validate`,
@@ -369,8 +371,8 @@ The suite is synthetic-only: every fixture is written to a temporary directory,
 never into `dataset/`. It covers EXIF orientation, aspect rejection, resolution
 normalisation, duplicate content, split integrity and the frozen SHA, quality
 thresholds, mask validation, polygon/mask round-trips, the IoU gate, corrupted
-files, and the CLIs end to end. See the final report for the exact pass count of
-the last run.
+files, and the CLIs end to end. As of this commit there are 64 tests and all of
+them pass (`64 passed`).
 
 ---
 
