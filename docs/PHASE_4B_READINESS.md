@@ -322,7 +322,7 @@ SHA-256 were not changed.
 
 ## 13. Commit hashes
 
-- `70db1a0` docs: add Phase 4B physical readiness audit
+- Recorded in `git log` on branch `dev-test01` (Phase 4B readiness audit commit).
 
 ## 14. Honest overall assessment
 
