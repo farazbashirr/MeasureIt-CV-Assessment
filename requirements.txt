@@ -10,6 +10,7 @@ pypdf==6.21.4
 # Tests
 pytest==9.2.0
 #
-# The segmentation and measurement stages add torch, torchvision,
-# segmentation-models-pytorch, albumentations, timm, pandas and onnx-free
-# export tooling in their own phase, with their own pinned block.
+# Segmentation (Phase 3, CPU only). PyPI Windows wheels for this version are
+# CPU builds; no CUDA wheel is installed.
+torch==2.15.0
+torchvision==0.29.2

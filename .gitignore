@@ -23,6 +23,10 @@ dist/
 /AI_CV_Assessment.pdf
 /assessment_text.txt
 
+# --- Phase 3 local artifacts (checkpoints, run logs, inference output) ---
+/runs/
+/results/
+
 # --- OS / editor ---
 Thumbs.db
 Desktop.ini
