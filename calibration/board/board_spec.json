@@ -1,0 +1,26 @@
+{
+  "squares_x": 9,
+  "squares_y": 7,
+  "square_mm_nominal": 25.0,
+  "marker_mm_nominal": 18.0,
+  "dictionary": "DICT_4X4_50",
+  "page": "A4",
+  "pixels_per_mm": 12.0,
+  "measured_square_x_mm": null,
+  "measured_square_y_mm": null,
+  "measurement_instrument": null,
+  "measured_on": null,
+  "generated_utc": "2026-11-04T22:56:51Z",
+  "schema": "measureit.charuco/1",
+  "inner_corners": 48,
+  "board_size_mm": [
+    225.0,
+    175.0
+  ],
+  "page_size_mm": [
+    297.0,
+    210.0
+  ],
+  "measured_square_mm": null,
+  "notes": "Nominal sizes describe the PDF, not the paper. Fill measured_square_*_mm and measurement_instrument before calibrating."
+}

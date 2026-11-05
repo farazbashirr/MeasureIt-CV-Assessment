@@ -1,0 +1,16 @@
+# Measure It - pinned environment (Python 3.15, Windows, CPU only)
+#
+# Runtime (calibration stage)
+numpy==2.5.4
+opencv-contrib-python==4.14.0.94
+pillow==13.0.0
+reportlab==5.1.0
+pypdf==6.21.4
+#
+# Tests
+pytest==9.2.0
+#
+# Segmentation (Phase 3, CPU only). PyPI Windows wheels for this version are
+# CPU builds; no CUDA wheel is installed.
+torch==2.15.0
+torchvision==0.29.2
