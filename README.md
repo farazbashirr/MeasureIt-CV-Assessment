@@ -18,10 +18,13 @@ no Roboflow model).
 | Phase 1 — board generator, camera model, calibration pipeline | software complete, **physical calibration not performed** |
 | Phase 2 — ingestion, quality checks, annotation tooling, reporting | software complete |
 | Phase 3 — U-Net segmentation, measurement engine, inference CLI | **software complete; model not trained** |
+| Phase 4A — experiments, benchmark, accuracy/refusal reporting | **software complete; no physical results generated** |
 | Dataset images | **0 / 100** — no real photographs have been captured yet |
 | Annotations | **0** — no masks or polygons exist |
 | Segmentation model | implemented, **not trained**; no checkpoint exists |
 | Measurement accuracy vs instrument | not measured |
+| Tilt study | not measured |
+| Real-artifact benchmark | not run |
 
 `calibration/params/camera.json` and `calibration/report/` **do not exist**. They
 are only written by a real passing calibration run, and no such run has
@@ -29,9 +32,11 @@ happened. Nothing in this repository fabricates images, masks, measurements or
 metrics. `dataset/report/dataset_report.md` currently says `0 / 100`, which is
 the honest state.
 
-Phase 3's tests use generated markers and known synthetic transformations. They
-verify the software's geometry and refusal paths; they are **not** real-world
-measurement evidence and say nothing about accuracy against an instrument.
+Phase 3 and 4A tests use generated markers, synthetic cameras and known
+transformations. They verify the software's geometry, reporting and refusal
+paths; they are **not** real-world measurement evidence and say nothing about
+accuracy against an instrument. The decision record is
+`docs/DECISION_RECORD.md`.
 
 ---
 
@@ -54,6 +59,10 @@ measurement evidence and say nothing about accuracy against an instrument.
    checkpoint is missing.
 7. **Prove it**: compare 12 measured instances against a real instrument and
    report the actual error.
+8. **Report it**: use the Phase 4A tools for raw-vs-undistorted comparison, the
+   measured tilt study, a CPU benchmark, accuracy/per-instance reporting and
+   refusal analysis. Each tool writes an explicit `unavailable` record when its
+   physical inputs are missing.
 
 ---
 
@@ -69,9 +78,12 @@ measureit/          shared camera model and image I/O
 segmentation/       U-Net + MobileNetV3-Small, training, evaluation, metrics
 measurement/        ArUco reference, homography geometry, measurement engine,
                     inference CLI, reference.json template, physical manifests
+evaluation/         Phase 4A experiments: raw vs undistorted, condition study,
+                    CPU benchmark, accuracy study, refusal analysis
 runs/               local training runs and checkpoints (gitignored)
-results/            local inference JSON/overlays (gitignored)
-docs/               PLAN.md, OBJECTIVES.md, DEFINITION_OF_DONE.md
+results/            local inference and experiment output (gitignored)
+docs/               PLAN.md, OBJECTIVES.md, DEFINITION_OF_DONE.md,
+                    DECISION_RECORD.md
 tests/              synthetic-only unit tests (never write into dataset/)
 tools/              helper scripts
 ```
@@ -497,6 +509,227 @@ camera or instrument was used.
 
 ---
 
+## Phase 4A — experiment automation and reporting
+
+Phase 4A is **software infrastructure only**. None of the commands below has
+been run against real photographs, a real calibration, a trained checkpoint or
+instrument ground truth. Missing inputs produce an explicit `unavailable`
+report; the tools never fill a gap with a guessed value.
+
+Reports go under `results/` (gitignored) unless `--out` says otherwise. The
+test suite writes only to temporary directories.
+
+### 1. Raw vs undistorted comparison
+
+```powershell
+python -m evaluation.raw_vs_undistorted `
+    --image dataset/images/S01_001.jpg `
+    --camera calibration/params/camera.json `
+    --reference measurement/reference.json `
+    --checkpoint runs/seg/best.pt `
+    --out results/raw_vs_undistorted
+```
+
+For each image the tool writes:
+
+- `<stem>_comparison.json` — raw and undistorted measurement records, camera
+  metadata, timings and the difference;
+- `<stem>_raw.png` and `<stem>_undistorted.png`;
+- `<stem>_raw_overlay.png` and `<stem>_undistorted_overlay.png`;
+- `<stem>_side_by_side.png`.
+
+The difference is **undistorted minus raw** in millimetres. A positive value
+means the undistorted measurement is larger. If either side is rejected, or the
+calibration/reference/checkpoint is missing, the difference is `null` and the
+report says why. Exit codes match inference: `0` ok, `2` usage, `3` missing
+physical data, `4` image-level rejection.
+
+### 2. Tilt / condition study
+
+The study consumes saved inference results and a manifest of **measured** tilt
+angles. It does not capture images or create angles.
+
+1. Run inference on every tilt frame into one results directory:
+
+   ```powershell
+   python -m measurement.infer --image <frame> --camera <camera.json> `
+       --reference <reference.json> --checkpoint <best.pt> --out results/tilt
+   ```
+
+2. Write a manifest with the angle measured for each frame:
+
+   ```csv
+   stem,measured_angle_deg,target_angle_deg,condition,notes
+   T00_01,0.4,0,fixed_400mm_daylight,digital level
+   T10_01,10.2,10,fixed_400mm_daylight,digital level
+   ```
+
+   `measured_angle_deg` (or `angle_deg`) is required. `target_angle_deg` is
+   kept for provenance but is **never** used for grouping. A manifest with only
+   targets is refused.
+
+3. Optionally supply manual ground truth for error metrics:
+
+   ```csv
+   stem,width_mm,height_mm,instrument,measured_utc,notes
+   T00_01,120.1,80.0,digital calliper,2026-11-05,three readings
+   ```
+
+   The instrument column is mandatory. The tool never derives ground truth.
+
+4. Generate the report:
+
+   ```powershell
+   python -m evaluation.condition_study `
+       --manifest measurement/conditions/tilt_measurements.csv `
+       --images dataset/images `
+       --results results/tilt `
+       --ground-truth measurement/ground_truth.csv `
+       --out results/condition_study
+   ```
+
+Outputs are `condition_study.json`, `condition_study.csv` (per instance) and
+`condition_study.md` (grouped by measured angle). Each group reports instance
+count, failure/refusal rate, failure codes, MAE width, MAE height, maximum
+absolute error and mean percentage error. Missing results count as failures;
+error metrics are marked unavailable when no ground-truth pair exists.
+
+### 3. CPU performance benchmark
+
+```powershell
+python -m evaluation.timing `
+    --image dataset/images/S01_001.jpg `
+    --camera calibration/params/camera.json `
+    --reference measurement/reference.json `
+    --checkpoint runs/seg/best.pt `
+    --warmup 2 --repetitions 10 --threads 4 `
+    --out results/benchmark
+```
+
+Stages timed separately: **model load**, **undistort**, **segmentation**,
+**reference marker detection**, **geometry + measurement**, and **total
+inference** (undistort through measurement, excluding image load and model
+load). The report records the CPU/OS/Python/torch/OpenCV environment, image
+dimensions, model input size, warm-up count, repetitions, median, p95, min and
+max. `benchmark_repetitions.csv` holds every repetition.
+
+This is a **software timing** report, not an accuracy claim. If the supplied
+frame does not produce a valid measurement, the report is marked `partial` and
+the geometry stage is left unavailable rather than timing a meaningless value.
+Missing calibration, measured reference size or checkpoint produces an
+`unavailable` report and exit code `3`.
+
+### 4. Accuracy evaluation reporting
+
+```powershell
+python -m evaluation.accuracy_study `
+    --ground-truth measurement/ground_truth.csv `
+    --results results/accuracy_instances `
+    --out results/accuracy
+```
+
+The ground-truth CSV is **manual instrument data**, one row per instance:
+
+```csv
+stem,width_mm,height_mm,instrument,measured_utc,notes
+A01,120.2,80.1,digital calliper,2026-11-05,three readings
+```
+
+The accuracy report writes `accuracy.json`, `accuracy_per_instance.csv` and
+`accuracy.md`. It reports width, height and combined (width + height pooled)
+metrics:
+
+- MAE (mm);
+- RMSE (mm);
+- mean percentage error (`100 × |error| / ground truth`);
+- maximum absolute error (mm);
+- failure / refusal rate and a breakdown of failure codes;
+- a per-instance comparison table.
+
+Metrics are computed on successful measurements only; the failure rate is
+reported separately so a high refusal rate cannot hide behind a good MAE. A
+missing ground-truth file, missing results, or zero valid measurements produces
+an `unavailable` report and exit code `3`. The tool never generates, estimates
+or back-fills a ground-truth value.
+
+### 5. Refusal analysis
+
+```powershell
+python -m evaluation.refusal_analysis `
+    --cases measurement/conditions/refusal_cases.csv `
+    --images dataset/images `
+    --results results/refusals `
+    --out results/refusal_analysis
+```
+
+The cases CSV names the expected outcome for each saved result:
+
+```csv
+case_id,stem,expected_code,expected_category,synthetic,notes
+R01,ref_missing_01,missing_reference,missing_reference,true,generated marker removed
+R02,ref_clipped_02,invalid_geometry,invalid_marker_geometry,true,marker clipped
+R03,occluded_03,partial_occlusion,occlusion,true,mask touches border
+R04,empty_04,missing_object,unreliable_segmentation,true,no mask
+R05,no_camera_05,missing_calibration,invalid_calibration,true,calibration absent
+```
+
+A case passes only when both the observed code and the expected category match.
+The report covers these required categories: `missing_reference`,
+`invalid_marker_geometry`, `occlusion`, `unreliable_segmentation`,
+`invalid_calibration` and `excessive_tilt`. It also recognises
+`invalid_object_geometry`, `reference_unavailable`, `checkpoint_unavailable`,
+`missing_result` and `ok`.
+
+Outputs are `refusal_analysis.json`, `refusal_cases.csv` and
+`refusal_analysis.md`. The report shows a coverage table, including required
+categories with **zero** cases, and counts synthetic / real / unlabelled cases.
+The current engine has **no excessive-tilt threshold**, so that category is
+reported as not covered unless a saved result actually carries an
+`excessive_tilt` code. Exit codes: `0` all cases match, `1` at least one
+mismatch, `2` usage error, `3` no results available.
+
+### 6. Report locations
+
+| Experiment | Default output | Main files |
+|---|---|---|
+| raw vs undistorted | `results/raw_vs_undistorted/` | `*_comparison.json`, overlays, side-by-side |
+| tilt / condition study | `results/condition_study/` | `condition_study.{json,csv,md}` |
+| CPU benchmark | `results/benchmark/` | `benchmark.{json,md}`, `benchmark_repetitions.csv` |
+| accuracy study | `results/accuracy/` | `accuracy.{json,md}`, `accuracy_per_instance.csv` |
+| refusal analysis | `results/refusal_analysis/` | `refusal_analysis.{json,md}`, `refusal_cases.csv` |
+
+`results/` is gitignored: these are local experiment artifacts. The same tools
+can write elsewhere with `--out`.
+
+### 7. Synthetic tests versus physical validation
+
+- Every Phase 4A test fixture is generated in a temporary directory. Markers,
+  cameras, masks, angles and ground truth in the tests are **synthetic**.
+- A refusal-analysis case is evidence only for what its `synthetic` column
+  says. If no case is labelled real, the report states that it is not
+  real-world evidence.
+- No tool invents a ground-truth dimension, a measured tilt angle, a benchmark
+  timing or an accuracy metric. Missing physical data is reported as
+  unavailable.
+- Passing the 4A tests proves that the reporting and refusal plumbing works; it
+  does not prove measurement accuracy, robustness or latency on real data.
+
+### 8. Phase 4A limitations
+
+- No real calibration, image, mask, checkpoint, instrument measurement or tilt
+  angle exists yet, so no Phase 4A report can contain a real result.
+- The tilt study requires a measured angle per frame; a target angle is not a
+  measurement.
+- The benchmark is machine- and thread-count-specific and says nothing about
+  accuracy.
+- Accuracy metrics describe successful measurements only; read the failure /
+  refusal rate with them.
+- Excessive tilt is not implemented as a refusal threshold. That remains an
+  open decision to be justified by real tilt data.
+- Synthetic fixtures are software checks, not physical evidence.
+
+---
+
 ## Adding your Pixel 8 Pro photographs later
 
 The camera is fixed in `docs/PLAN.md`: **Pixel 8 Pro, main (wide) lens, 1.0×
@@ -568,6 +801,11 @@ made.
 | `python -m segmentation.train` | train the U-Net on the frozen splits |
 | `python -m segmentation.evaluate` | evaluate a checkpoint, or report unavailable |
 | `python -m measurement.infer` | measure one image, or refuse explicitly |
+| `python -m evaluation.raw_vs_undistorted` | measure raw and undistorted versions of one frame |
+| `python -m evaluation.condition_study` | group saved results by measured tilt angle |
+| `python -m evaluation.timing` | benchmark CPU inference stages |
+| `python -m evaluation.accuracy_study` | compare saved measurements with manual ground truth |
+| `python -m evaluation.refusal_analysis` | check refusal codes and category coverage |
 
 All commands accept `--help`.
 
@@ -588,7 +826,13 @@ tests (including the mask-AP definition), frozen-split loader tests, generated
 ArUco detection, homography/rectification, min-area rectangles, pixel-to-mm
 conversion, tilt compensation and rejection tests for missing reference,
 missing object, partial occlusion, invalid geometry and every CLI refusal path.
-As of this commit there are 124 tests and all of them pass (`124 passed`).
+
+Phase 4A adds tests for strict CSV schemas and manual-ground-truth provenance,
+raw-vs-undistorted difference arithmetic and unavailable reports, measured-angle
+grouping (including refusal of target-only manifests), condition-study metrics,
+staged benchmark timing and thread restoration, accuracy metrics from known
+synthetic numbers, refusal-code/category matching and coverage gaps. As of this
+commit there are **187 tests** and all of them pass (`187 passed`).
 
 ---
 
@@ -601,12 +845,19 @@ As of this commit there are 124 tests and all of them pass (`124 passed`).
 - No model has been trained; there is no checkpoint and no measured model metric.
 - No measurement has been compared with an instrument, so no accuracy figure is
   claimed.
+- No Phase 4A report has been produced from real artifacts. The tools are
+  implemented and tested; they are not results.
+- No tilt/condition study, no real-artifact benchmark and no real refusal study
+  exists. Reports generated from synthetic fixtures are labelled as such and are
+  not accuracy or robustness evidence.
 - Tilt angles, marker sizes and object sizes in the tests are synthetic. The
   tests do not demonstrate real-world measurement accuracy.
 - The measurement assumes the marker and object are coplanar. That assumption is
   stated in every result and is not verified by the software.
 - `reliability` is a rule-based geometry grade, not a calibrated probability or a
   confidence interval.
+- Excessive tilt is not implemented as a refusal threshold; the refusal report
+  records that gap rather than inventing one.
 
 See `docs/PLAN.md`, `docs/OBJECTIVES.md` and `docs/DEFINITION_OF_DONE.md` for the
 contract this work is measured against.
