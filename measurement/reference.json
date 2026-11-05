@@ -1,0 +1,13 @@
+{
+  "schema": "measureit.reference/1",
+  "dictionary": "DICT_4X4_50",
+  "marker_id": 0,
+  "marker_size_mm": null,
+  "min_marker_px": 60.0,
+  "max_side_ratio": 3.0,
+  "min_object_area_pct": 0.2,
+  "min_dimension_mm": 0.5,
+  "max_dimension_mm": 2000.0,
+  "border_margin_px": 2,
+  "notes": "marker_size_mm is the measured side of the printed marker's outer black square. It is null until a printed marker has been measured with a ruler or caliper."
+}
