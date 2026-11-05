@@ -19,3 +19,8 @@
 *.pth     binary
 *.npz     binary
 *.onnx    binary
+
+# Frozen manifest: the pre-registered SHA-256 (1D726C51...D75C) is defined over
+# the CRLF working file, so force CRLF on checkout on every platform. Git still
+# stores the canonical LF blob; the file's content is never rewritten.
+dataset/splits.csv text eol=crlf
