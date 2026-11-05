@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from measurement.engine import measure
-from measurement.reference import ReferenceError, ReferenceSpec
+from measurement.reference import ReferenceError, ReferenceSpec, detect_marker
 
 ROOT = Path(__file__).resolve().parents[1]
 DICTIONARY = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -52,6 +52,21 @@ def test_synthetic_measurement_is_100_by_60_mm():
     assert result.checks["single_component"]
     assert result.checks["inside_frame"]
     assert result.warnings[0].startswith("marker and object are assumed coplanar")
+
+
+def test_measure_accepts_a_pre_detected_marker():
+    image, mask = _scene()
+    spec = ReferenceSpec(marker_size_mm=50.0)
+    marker = detect_marker(image, spec)
+    assert marker is not None
+
+    result = measure(image, mask, spec, marker=marker)
+
+    assert result.ok
+    assert result.width_mm == pytest.approx(100.0, abs=0.5)
+    assert result.height_mm == pytest.approx(60.0, abs=0.5)
+    assert result.checks["reference_present"]
+    assert result.checks["reference_geometry_ok"]
 
 
 def test_missing_reference_is_reported():

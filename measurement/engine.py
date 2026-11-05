@@ -125,8 +125,15 @@ def measure(
     image_bgr: np.ndarray,
     mask: np.ndarray | None,
     reference: ReferenceSpec,
+    *,
+    marker: Marker | None = None,
 ) -> MeasurementResult:
     """Measure the object described by ``mask`` against the reference marker.
+
+    ``marker`` may be a marker already detected on the same image; when it is
+    omitted, detection runs inside this function. Reusing a marker lets a
+    benchmark time reference detection and geometry separately without
+    changing the measurement itself.
 
     Expected failures are returned as ``status="rejected"`` with a code; only
     programming errors (a missing image) raise.
@@ -146,26 +153,30 @@ def measure(
         )
     checks["reference_size_configured"] = True
 
-    try:
-        marker = detect_marker(image_bgr, reference)
-    except ReferenceError as exc:
-        checks["reference_present"] = True
-        checks["reference_geometry_ok"] = False
-        return _rejected(
-            "invalid_geometry",
-            f"reference marker is present but unusable: {exc}",
-            checks=checks,
-        )
-
-    checks["reference_present"] = marker is not None
-    checks["reference_geometry_ok"] = marker is not None
     if marker is None:
-        return _rejected(
-            "missing_reference",
-            f"no ArUco marker with id {reference.marker_id} "
-            f"({reference.dictionary}) was detected",
-            checks=checks,
-        )
+        try:
+            marker = detect_marker(image_bgr, reference)
+        except ReferenceError as exc:
+            checks["reference_present"] = True
+            checks["reference_geometry_ok"] = False
+            return _rejected(
+                "invalid_geometry",
+                f"reference marker is present but unusable: {exc}",
+                checks=checks,
+            )
+
+        checks["reference_present"] = marker is not None
+        checks["reference_geometry_ok"] = marker is not None
+        if marker is None:
+            return _rejected(
+                "missing_reference",
+                f"no ArUco marker with id {reference.marker_id} "
+                f"({reference.dictionary}) was detected",
+                checks=checks,
+            )
+    else:
+        checks["reference_present"] = True
+        checks["reference_geometry_ok"] = True
 
     if mask is None:
         checks["mask_shape_ok"] = False
