@@ -1,0 +1,21 @@
+{
+  "schema": "measureit.quality/1",
+  "working_size": [2048, 1536],
+  "blur": {
+    "laplacian_variance_min": 120.0
+  },
+  "exposure": {
+    "mean_luma_min": 45.0,
+    "mean_luma_max": 210.0,
+    "clipped_dark_pct_max": 8.0,
+    "clipped_bright_pct_max": 5.0
+  },
+  "duplicates": {
+    "dhash_hamming_max": 5
+  },
+  "mask": {
+    "area_pct_min": 0.5,
+    "area_pct_max": 80.0
+  },
+  "notes": "Initial thresholds, committed before any real capture. They are advisory: a flagged image is reported, not deleted. Re-tune only after the first real session and record the change here."
+}
