@@ -15,6 +15,10 @@ dist/
 /tmp/
 *.log
 
+# --- Camera originals are archived locally; provenance is their SHA-256 in
+# --- dataset/capture_log.csv (the 2048x1536 working images are committed).
+/dataset/originals/
+
 # --- Assessment brief is input, not a deliverable ---
 /AI_CV_Assessment.pdf
 /assessment_text.txt
